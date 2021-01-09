@@ -1,7 +1,7 @@
 <template>
   <div class="home">
     <input type="file" accept="image/*" @change="onChange"/>
-    <img v-if="previewImage" :src="previewImage" alt="预览图">
+    <img v-if="previewImage" :src="previewImage" alt="预览图" style="max-width: 100%; max-height: 100%;">
     <Cropper v-if="cropperVisible"
              :imagePath="imagePath"
              fileType="blob"
