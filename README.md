@@ -12,10 +12,11 @@
 5. 可选择图片的质量；
 6. 支持图片旋转(也是里面最复杂的功能)；
 7. 还原(裁剪不满意可以还原到默认状态)；
-8. 展示输出图片的尺寸。
+8. 展示输出图片的尺寸;
+9. 支持两种裁剪模式(原图模式、缩放模式)默认采用原图模式
 
 ### Demo
-[地址](https://dreamicalwestswim.github.io/vue3-cropper/demo)
+[地址](https://dreamicalwestswim.github.io/vue3-cropper/demo/)
 
 ## 安装
 ```
@@ -42,6 +43,7 @@ app.use(Cropper)
     <Cropper v-if="cropperVisible"
              :imagePath="imagePath"
              fileType="blob"
+             mode="scale"
              @save="onSave"
              @cancel="onCancel"
     />
@@ -92,7 +94,19 @@ export default {
 ```
 
 #### Props
- tips:   最终输出的图片尺寸是按照原图尺寸来的，裁剪框尺寸只是框的大小
+ tips:  
+ 截图质量：  
+ 如果要无损图可以设置imageType="image/png", 图片不会进行任何压缩，缺点是体积太大.  
+ 
+如果觉得截取的图片太大，可以设置imageType="image/jpeg"，调整图片质量quality 0-1 数字越小图片质量越差,体积也会越小.
+
+透明图片：  
+设置imageType="image/png"，其他格式不支持透明
+
+截图尺寸:  
+默认输出原图尺寸，截取的部分是相对原图的那部分的尺寸,优点高清损耗低，缺点体积过大。  
+如果需要缩放尺寸,设置mode="scale" 就是图片缩放后在裁剪框内的那部分尺寸, 优点体积小，缺点损耗大
+
 
   参数  | 说明 | 类型 | 默认值
  ---- | ----- | ------ | ------  
@@ -102,7 +116,8 @@ export default {
  imageType  | 输出图片的格式(image/jpeg、image/png、image/webp)其中 image/webp 只有 chrome 才支持 | String | image/jpeg   
  quality  | 输出图片的质量(0-1)并且只在格式为 image/jpeg 或 image/webp 时才有效，如果参数值格式不合法，将会被忽略并使用默认值。 | Number | .9
  fixedBox  | 固定裁剪框,设置true裁剪框不可修改 | Boolean | false
- showOutSize  | 展示输出图片的尺寸 | boolean | true
+ showOutputSize  | 展示输出图片的尺寸 | boolean | true
+ mode  | 裁剪模式(scale 缩放模式)，不设置则按照原图尺寸输出 | String |
 
 #### Event
 

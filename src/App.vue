@@ -5,6 +5,7 @@
     <Cropper v-if="cropperVisible"
              :imagePath="imagePath"
              fileType="blob"
+             mode="scale"
              @save="onSave"
              @cancel="onCancel"
     />

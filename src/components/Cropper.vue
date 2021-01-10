@@ -34,7 +34,9 @@
                          }"
                         >
                     </div>
-                    <div v-if="showOutSize" class="size-num">{{`${outSize.width} x ${outSize.height}`}}</div>
+                    <div v-if="showOutputSize" class="size-num">
+                        {{`${outputSizeInfo.width} x ${outputSizeInfo.height}`}}
+                    </div>
                     <div class="mask" data-name="mask"></div>
                     <div class="line-top"></div>
                     <div class="line-right"></div>
@@ -73,12 +75,12 @@
 </template>
 
 <script>
-import {reactive, ref, toRefs, onMounted} from 'vue'
+import {reactive, ref, toRefs, onMounted, computed} from 'vue'
 export default {
     name: 'Cropper',
     inheritAttrs: false,
     props: {
-        // 裁剪大小(图片百分之百裁剪出的大小)
+        // 裁剪框大小
         cropSize: {
             type: Number,
             default: 150
@@ -103,10 +105,12 @@ export default {
             default: false
         },
         // 展示输出图片的尺寸(可关闭)
-        showOutSize: {
+        showOutputSize: {
             type: Boolean,
             default: true
-        }
+        },
+        // 裁剪模式(原图模式|缩放模式)
+        mode: String
     },
     emits: ['save', 'cancel'],
     setup(props, { emit }) {
@@ -133,7 +137,7 @@ export default {
                 height: 0,
             },
             // 输出尺寸(根据图片比例裁剪框尺寸及裁剪的位置算出的实际尺寸)
-            outSize: {
+            outputSize: {
                 width: 0,
                 height: 0,
             },
@@ -162,6 +166,17 @@ export default {
             cropHeight: 0,
             touches: []
         }
+
+        // 输出尺寸信息
+        const outputSizeInfo = computed(()=>{
+            return props.mode === 'scale' ? {
+                width: Math.floor(state.outputSize.width * state.originalImage.scale),
+                height: Math.floor(state.outputSize.height * state.originalImage.scale)
+            } : {
+                width: state.outputSize.width,
+                height: state.outputSize.height
+            }
+        });
 
         /**
          * 获取canvas绘图能力
@@ -204,7 +219,7 @@ export default {
             state.cropBox.left = (stage.value.clientWidth - props.cropSize) / 2
             state.cropBox.top = (stage.value.clientHeight - props.cropSize) / 2
             setCanvasSize(width, height)
-            setOutSize()
+            setOutputSize()
         };
 
         /**
@@ -239,7 +254,7 @@ export default {
         /**
          * 计算输出尺寸(按照图片的比例选取的位置)
          */
-        const setOutSize = () => {
+        const setOutputSize = () => {
             // 获取裁剪框的原信息(就是未被缩放,相对图片的xy坐标，和裁剪大小的信息)
             let { x, y, w, h } = cropBoxOriginalInfo()
             //把canvas尺寸当成图片尺寸，因为canvas会根据图片旋转同步成原图的宽高(取canvas宽高会比较方便)
@@ -285,8 +300,8 @@ export default {
                 outWidth = outHeight = 0
             }
 
-            state.outSize.width = outWidth
-            state.outSize.height = outHeight
+            state.outputSize.width = outWidth
+            state.outputSize.height = outHeight
         };
 
 
@@ -313,7 +328,7 @@ export default {
                 setCanvasSize(state.originalImage.height, state.originalImage.width)
             }
             state.originalImage.rotate = rotate
-            setOutSize()
+            setOutputSize()
         };
 
         /**
@@ -401,7 +416,7 @@ export default {
             state.originalImage.scale = scale
             // 缩放以后更新上一次的手势信息
             touchStartInfo.touches = res.touches
-            setOutSize()
+            setOutputSize()
         };
 
         /**
@@ -497,7 +512,7 @@ export default {
                 state.cropBox.width = width
                 state.cropBox.height = height
             }
-            setOutSize()
+            setOutputSize()
         };
 
         /**
@@ -517,7 +532,7 @@ export default {
             // 获得裁剪框相对原图1比1的情况下的信息
             let { x, y} = cropBoxOriginalInfo()
             // 宽高用计算好的输出尺寸,否则ios又不对，真难伺候md
-            const {width:w,height:h} = state.outSize
+            const {width:w,height:h} = state.outputSize
             // 图片的当前信息
             const { rotate, width: imgW, height: imgH } = state.originalImage
 
@@ -577,12 +592,26 @@ export default {
          * canvas转换成base64
          */
         const canvasToDataURL = (imageData, width, height) => {
+            // 数据绘制到新的画板上
             let canvas = document.createElement('canvas')
             let ctx = canvas.getContext('2d')
             canvas.width = width
             canvas.height = height
             ctx.putImageData(imageData,0,0)
-            return canvas.toDataURL(props.imageType, props.quality)
+            let target = canvas
+
+            // 缩放模式
+            if(props.mode === 'scale'){
+                // 新建一个缩放画板进行绘制
+                let zoomCanvas = document.createElement('canvas')
+                let zoomCtx = zoomCanvas.getContext('2d')
+                zoomCanvas.width = (width * state.originalImage.scale)
+                zoomCanvas.height = (height * state.originalImage.scale)
+                zoomCtx.scale(zoomCanvas.width / width,zoomCanvas.height / height)
+                zoomCtx.drawImage(canvas,0,0)
+                target = zoomCanvas
+            }
+            return target.toDataURL(props.imageType, props.quality)
         };
 
         /**
@@ -617,7 +646,8 @@ export default {
             onRotate,
             onReset,
             onCrop,
-            onCancel
+            onCancel,
+            outputSizeInfo
         }
     }
 }
