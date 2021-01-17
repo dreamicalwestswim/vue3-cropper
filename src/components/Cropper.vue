@@ -11,12 +11,11 @@
 
                 <img class="cropper__img"
                      ref="imageRef"
-                     :src="imagePath"
+                     :src="img"
                      alt=""
                      :style="{
                      transform: `translate3d(${originalImage.left}px,${originalImage.top}px,0) rotateZ(${originalImage.rotate}deg) scale(${originalImage.scale})`
                  }"
-                     @load="onLoadComplete"
                 >
 
                 <div class="cropper__box"
@@ -27,7 +26,7 @@
                  }"
                 >
                     <div class="face">
-                        <img :src="imagePath"
+                        <img :src="img"
                              alt=""
                              :style="{
                              transform: `translate3d(${originalImage.left - cropBox.left}px,${originalImage.top - cropBox.top}px,0) rotateZ(${originalImage.rotate}deg) scale(${originalImage.scale})`
@@ -65,17 +64,16 @@
                 <span @click="onReset">还原</span>
                 <span @click="onCrop">选取</span>
             </div>
-
-            <view style="height:0;overflow: hidden; position: absolute;left:9999px">
-                <canvas ref="canvasRef" :width="canvas.width" :height="canvas.height"/>
-            </view>
         </div>
+
     </teleport>
 
 </template>
 
 <script>
-import {reactive, ref, toRefs, onMounted, computed} from 'vue'
+import {reactive, ref, toRefs, onMounted, computed, watch} from 'vue'
+import {getOrientation, getImageArrayBuffer, dataURLToBlob, parseOrientation, arrayBufferToDataURL} from './utils'
+
 export default {
     name: 'Cropper',
     inheritAttrs: false,
@@ -109,12 +107,19 @@ export default {
             type: Boolean,
             default: true
         },
-        // 裁剪模式(原图模式|缩放模式)
-        mode: String
+        // 裁剪模式(高清模式|缩放模式)
+        mode: String,
+        // 传入的图片最大尺寸(超过这个尺寸会被压缩，手机端移动2000像素以上的图片会出现卡顿，严重影响到体验)
+        maxImgSize: {
+            type: Number,
+            default: 2000
+        }
     },
     emits: ['save', 'cancel'],
     setup(props, { emit }) {
         const state = reactive({
+            // 内部图片
+            img: '',
             // 原图属性
             originalImage: {
                 width: 0,
@@ -131,11 +136,6 @@ export default {
                 left: 0,
                 top: 0
             },
-            // canvas大小
-            canvas: {
-                width: 0,
-                height: 0,
-            },
             // 输出尺寸(根据图片比例裁剪框尺寸及裁剪的位置算出的实际尺寸)
             outputSize: {
                 width: 0,
@@ -148,9 +148,10 @@ export default {
         // 舞台(就是裁剪可操作的区域)
         let stage = ref()
         // canvas 2d绘图
-        let canvasRef = ref()
-        let ctx = null
-        // 要绘制的图片
+        let canvas = document.createElement('canvas');
+        //document.body.appendChild(canvas)
+        let ctx = canvas.getContext('2d');
+        // 要绘制的图片对象
         let imageRef = ref()
         // 拖拽的目标
         let dragTarget = null
@@ -179,21 +180,112 @@ export default {
         });
 
         /**
-         * 获取canvas绘图能力
+         * 手动校正图片(修正图片方向问题)
+         */
+        const correctionPicture = (img, width, height, orientation) => {
+            // 获取校正后的角度
+            const { rotate } = parseOrientation(orientation);
+
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            canvas.width = width;
+            canvas.height = height;
+            // 旋转90度图片宽高需要调换
+            if(orientation === 6 || orientation === 8){
+                canvas.width = height;
+                canvas.height = width;
+            }
+
+            // 利用图片方向属性将图片角度往相反的角度旋转回0度(主要针对有exif方向信息的图片，只有照片才有这个属性)。
+            switch (orientation) {
+                // 1=0度图片(手机逆时针90度拍照)
+                //  case 1:
+                //  break;
+                // 3=180度图片(手机逆时针270度、顺时针90度拍照)
+                case 3:
+                    ctx.translate(width / 2, height / 2);
+                    ctx.rotate(rotate * Math.PI / 180);
+                    ctx.translate(-width / 2, -height / 2);
+                    break;
+                // 6=逆时针旋转90度图片(手机竖屏0度拍照)
+                case 6:
+                    ctx.translate(height / 2, width / 2);
+                    ctx.rotate(rotate * Math.PI / 180);
+                    ctx.translate(-width / 2, -height / 2);
+                    break;
+                // 8=顺时针旋转90度图片(手机竖屏正逆时针180度拍照)
+                case 8:
+                    ctx.translate(height / 2, width / 2);
+                    ctx.rotate(rotate * Math.PI / 180);
+                    ctx.translate(-width / 2, -height / 2);
+                    break;
+            }
+
+            ctx.drawImage(img, 0, 0, width, height);
+            ctx.restore();
+            return canvas.toDataURL(props.imageType, 1);
+        };
+
+        /**
+         * 读取图片流程
+         * 1 将图片数据转换成arrayBuffer二进制字节数组
+         * 2 识别图片方向
+         * 3 创建图片读取arrayBuffer转换的url,携带图片的原始数据
+         * 4 根据图片方向信息校正角度
+         */
+        const loadImg = () => {
+            if(!props.imagePath)return;
+            // win10显示角度正常，方向却是原始的值，直接按方向修复图片，那么显示角度就不对了，ios图片方向和显示角度一致，需要修复。(所以不直接使用系统提供的图片数据，因为不同的平台对图片的显示处理各不相同)
+            // 获取图片的原始二进制数据字节数组
+            getImageArrayBuffer(props.imagePath).then(arrayBuffer => {
+                // 先获取到图片的方向(避免系统自动根据图片方向修改图片显示角度,win10存在这个问题)
+                const orientation = getOrientation(arrayBuffer);
+                // 再去创建图片
+                let img = new Image();
+                img.onload = (e) => {
+                    let {width, height} = e.target;
+                    const {maxImgSize} = props;
+                    // 方向等于1是正常的，尺寸未超出最大尺寸不需要处理
+                    if(orientation === 1 && (!maxImgSize || width <= maxImgSize && height <= maxImgSize)){
+                        state.img = props.imagePath;
+                        state.originalImage.width = width
+                        state.originalImage.height = height
+                    } else {
+                        // 图片尺寸超过最大限制尺寸自动压缩尺寸
+                        if (maxImgSize && (width > maxImgSize || height > maxImgSize)) {
+                            let scale = Math.min(maxImgSize / width, maxImgSize / height);
+                            width*=scale;
+                            height*=scale;
+                        }
+                        // 使用校正过的最终数据
+                        state.img = correctionPicture(img, width, height, orientation);
+                        state.originalImage.width = canvas.width;
+                        state.originalImage.height = canvas.height;
+                    }
+                    state.loadComplete = true
+                    initialState()
+                };
+                // 读取原始的二进制字节数组转换的dataURL(图片会按照原始数据显示，不会被系统修改方向，保证了不同平台一致的显示效果。)
+                img.src = arrayBufferToDataURL(arrayBuffer,props.imageType);
+            });
+        };
+
+        /**
+         * 组件挂载时触发
          */
         onMounted(() => {
-            ctx = canvasRef.value.getContext("2d");
+            loadImg();
         });
 
         /**
-         * 图片载入完成
+         * 监听外部图片地址变化重新读取
          */
-        const onLoadComplete = (e) => {
-            state.originalImage.width = e.target.naturalWidth
-            state.originalImage.height = e.target.naturalHeight
-            state.loadComplete = true
-            initialState()
-        };
+        watch(() => props.imagePath,
+            (imagePath, prevImagePath) => {
+            if(imagePath !== prevImagePath)
+                loadImg();
+            }
+        );
 
         /**
          * 设置初始状态
@@ -218,14 +310,13 @@ export default {
             state.cropBox.height = props.cropSize
             state.cropBox.left = (stage.value.clientWidth - props.cropSize) / 2
             state.cropBox.top = (stage.value.clientHeight - props.cropSize) / 2
-            setCanvasSize(width, height)
             setOutputSize()
         };
 
         /**
-         * 裁剪框原坐标尺寸信息(就是相对原始图片的信息)
+         * 裁剪框相对信息(就是相对原始图片的信息)
          */
-        const cropBoxOriginalInfo = () => {
+        const cropBoxRelativeInfo = () => {
             // 因为图片缩放是用比例来完成的，所以left、top、width、height并不会发生变化,需要拿这些原始信息进行换算，得到裁剪框与当前缩放过的图片一致的坐标和尺寸信息。
             let { scale, rotate, width, height, left, top } = state.originalImage
             // 因为图片是居中在舞台中间的，所以上右下左都可能会超过舞台，需要取超过的一半值加上自身x、y得到肉眼看到的坐标值
@@ -255,10 +346,17 @@ export default {
          * 计算输出尺寸(按照图片的比例选取的位置)
          */
         const setOutputSize = () => {
-            // 获取裁剪框的原信息(就是未被缩放,相对图片的xy坐标，和裁剪大小的信息)
-            let { x, y, w, h } = cropBoxOriginalInfo()
-            //把canvas尺寸当成图片尺寸，因为canvas会根据图片旋转同步成原图的宽高(取canvas宽高会比较方便)
-            const { width: imgW, height: imgH } = state.canvas
+            // 获取裁剪框的相对图片信息
+            let { x, y, w, h } = cropBoxRelativeInfo()
+
+            const { rotate, width, height} = state.originalImage
+            let imgW = width;
+            let imgH = height;
+            if (rotate === 90 || rotate === 270) {
+                imgW = height;
+                imgH = width;
+            }
+
             // 输出尺寸默认等于裁剪框尺寸
             let outWidth = w
             let outHeight = h
@@ -304,15 +402,6 @@ export default {
             state.outputSize.height = outHeight
         };
 
-
-        /**
-         * 设置canvas尺寸(与原图片尺寸保持同步才能保证截图正确)
-         */
-        const setCanvasSize = (width, height) => {
-            state.canvas.width = width
-            state.canvas.height = height
-        };
-
         /**
          * 旋转图片
          */
@@ -320,13 +409,6 @@ export default {
             // 顺时针每一轮加90度
             let rotate = state.originalImage.rotate + 90
             if (rotate >= 360) rotate = 0
-
-            // 修改角度的时候就设置好canvas的尺寸，保证截图的时候图形不会出现变形
-            if (rotate === 0 || rotate === 180) {
-                setCanvasSize(state.originalImage.width, state.originalImage.height)
-            } else if (rotate === 90 || rotate === 270) {
-                setCanvasSize(state.originalImage.height, state.originalImage.width)
-            }
             state.originalImage.rotate = rotate
             setOutputSize()
         };
@@ -529,8 +611,8 @@ export default {
          * canvas裁剪
          */
         const onCrop = () => {
-            // 获得裁剪框相对原图1比1的情况下的信息
-            let { x, y} = cropBoxOriginalInfo()
+            // 获得裁剪框相对原图的xy
+            let { x, y} = cropBoxRelativeInfo()
             // 宽高用计算好的输出尺寸,否则ios又不对，真难伺候md
             const {width:w,height:h} = state.outputSize
             // 图片的当前信息
@@ -541,85 +623,46 @@ export default {
             y = y < 0 ? 0 : y
 
             ctx.save()
-            ctx.clearRect(0, 0, state.canvas.width, state.canvas.height)
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            canvas.width  = w;
+            canvas.height = h;
             switch (rotate) {
                 case 0:
-                    ctx.drawImage(imageRef.value, x, y, w, h, x, y, w, h)
+                    ctx.drawImage(imageRef.value, x, y, w, h, 0, 0, w, h)
                     break;
                 // 顺时针旋转90度
                 case 90:
                     ctx.translate(imgH, 0)
                     ctx.rotate(rotate / 180 * Math.PI)
-                    ctx.drawImage(imageRef.value, y, (-(x - imgH) - w), h, w, y, (-(x - imgH) - w), h, w)
+                    ctx.drawImage(imageRef.value, y, (-(x - imgH) - w), h, w, 0, (imgH - w), h, w)
                     break;
                 // 顺时针旋转180度
                 case 180:
                     ctx.translate(imgW, imgH)
                     ctx.rotate(rotate / 180 * Math.PI)
-                    ctx.drawImage(imageRef.value, (-x + imgW) - w, (-y + imgH) - h, w, h, (-x + imgW) - w, (-y + imgH) - h, w, h)
+                    ctx.drawImage(imageRef.value, (-x + imgW) - w, (-y + imgH) - h, w, h, imgW - w, imgH - h, w, h)
                     break;
                 // 顺时针旋转270度
                 case 270:
                     ctx.translate(0, imgW)
                     ctx.rotate(rotate / 180 * Math.PI)
-                    ctx.drawImage(imageRef.value, (-(y - imgW) - h), x, h, w, (-(y - imgW) - h), x, h, w)
+                    ctx.drawImage(imageRef.value, (-(y - imgW) - h), x, h, w, imgW - h, 0, h, w)
                     break;
             }
-            toTempFilePath(x, y, w, h)
-        };
+            ctx.restore();
 
-        /**
-         * base64转换成Blob对象
-         */
-        const dataURLToBlob = (dataURL) => {
-            // base64拆分开
-            let arr = dataURL.split(',');
-            // 获取到格式
-            let format = arr[0].match(/:(.*?);/)[1];
-            // 获取到base64解码数据
-            let data = window.atob(arr[1]);
-            // 因为颜色数据刚好都是符合8位二进制的无符号整数,所以这里采用Uint8Array,8位无符号正整数数组来处理
-            let n = data.length;
-            let u8arr = new Uint8Array(n);
-            while(n--){
-                // 获得图像数据字符对应的Unicode编码，0-255之间
-                u8arr[n] = data.charCodeAt(n);
-            }
-            return new Blob([u8arr], {type:format});
-        };
-
-        /**
-         * canvas转换成base64
-         */
-        const canvasToDataURL = (imageData, width, height) => {
-            // 数据绘制到新的画板上
-            let canvas = document.createElement('canvas')
-            let ctx = canvas.getContext('2d')
-            canvas.width = width
-            canvas.height = height
-            ctx.putImageData(imageData,0,0)
-            let target = canvas
-
-            // 缩放模式
+            let target = canvas;
+            // 缩放模式绘图
             if(props.mode === 'scale'){
-                // 新建一个缩放画板进行绘制
                 let zoomCanvas = document.createElement('canvas')
                 let zoomCtx = zoomCanvas.getContext('2d')
-                zoomCanvas.width = (width * state.originalImage.scale)
-                zoomCanvas.height = (height * state.originalImage.scale)
-                zoomCtx.scale(zoomCanvas.width / width,zoomCanvas.height / height)
+                zoomCanvas.width = (w * state.originalImage.scale)
+                zoomCanvas.height = (h * state.originalImage.scale)
+                zoomCtx.scale(zoomCanvas.width / w,zoomCanvas.height / h)
                 zoomCtx.drawImage(canvas,0,0)
                 target = zoomCanvas
             }
-            return target.toDataURL(props.imageType, props.quality)
-        };
-
-        /**
-         * 从canvas里面取出裁剪好的内容
-         */
-        const toTempFilePath = (x, y, w, h) => {
-            ctx.restore()
-            let data = canvasToDataURL(ctx.getImageData(x, y, w, h), w, h)
+            let data = target.toDataURL(props.imageType, props.quality);
             if(props.fileType === 'blob'){
                 data = dataURLToBlob(data)
             }
@@ -636,9 +679,7 @@ export default {
 
         return {
             stage,
-            canvasRef,
             imageRef,
-            onLoadComplete,
             ...toRefs(state),
             onTouchStart,
             onTouchMove,

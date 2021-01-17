@@ -5,7 +5,6 @@
     <Cropper v-if="cropperVisible"
              :imagePath="imagePath"
              fileType="blob"
-             mode="scale"
              @save="onSave"
              @cancel="onCancel"
     />
@@ -16,7 +15,7 @@
 
 
 import {reactive, toRefs} from 'vue'
-
+const URL = window.URL || window.webkitURL;
 export default {
   name: 'App',
   setup() {
@@ -28,12 +27,8 @@ export default {
 
     const onChange = (e) => {
       const file = e.target.files[0]
-      const reader = new FileReader();
-      reader.onload = () => {
-        state.imagePath = reader.result;
-        state.cropperVisible = true
-      };
-      reader.readAsDataURL(file);
+      state.imagePath = URL.createObjectURL(file);
+      state.cropperVisible = true
     };
 
     const onSave = (res) => {
@@ -41,7 +36,7 @@ export default {
       {
         state.previewImage = res
       } else {
-        state.previewImage = window.URL.createObjectURL(res)
+        state.previewImage = URL.createObjectURL(res)
       }
       state.cropperVisible = false
     };
