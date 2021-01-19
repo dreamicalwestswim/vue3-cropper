@@ -6,6 +6,7 @@
                  @touchstart="onTouchStart"
                  @touchmove="onTouchMove"
                  @touchend="onTouchEnd"
+                 @mousedown="onTouchStart"
                  :style="{visibility:loadComplete?'visible':'hidden'}"
             >
 
@@ -81,7 +82,7 @@ export default {
         // 裁剪框大小
         cropSize: {
             type: Number,
-            default: 150
+            default: 200
         },
         // 裁剪图路径(本地图片的路径或者图片的数据源base64|blob|file)
         imagePath: String,
@@ -165,7 +166,8 @@ export default {
             cropTop: 0,
             cropWidth: 0,
             cropHeight: 0,
-            touches: []
+            touches: [],
+            mouseInfo: {}
         }
 
         // 输出尺寸信息
@@ -424,6 +426,7 @@ export default {
          * 触摸开始
          */
         const onTouchStart = (res) => {
+            res.preventDefault()
             // 获取到触摸的目标名
             dragTarget = res.target.dataset.name
             // 记录开始触摸的原图位置
@@ -435,11 +438,20 @@ export default {
             touchStartInfo.cropWidth = state.cropBox.width
             touchStartInfo.cropHeight = state.cropBox.height
             // 记录开始的触摸手势信息
-            touchStartInfo.touches = res.touches
-            // 多指触碰屏幕开启手势缩放
-            if (touchStartInfo.touches.length > 1) {
-                touchZoom = true
+            if(res.touches){
+                touchStartInfo.touches = res.touches
+                // 多指触碰屏幕开启手势缩放
+                if (touchStartInfo.touches.length > 1) {
+                    touchZoom = true
+                }
+            } else {
+                // 鼠标点击
+                touchStartInfo.mouseInfo.clientX = res.clientX
+                touchStartInfo.mouseInfo.clientY = res.clientY
+                window.addEventListener("mousemove", onTouchMove);
+                window.addEventListener("mouseup", onTouchEnd);
             }
+
         };
 
         /**
@@ -508,16 +520,23 @@ export default {
             // 缩放图片防止浏览器放大缩小
             res.preventDefault()
             // 双指操作改变图片比例
-            if (res.touches.length === 2) {
+            if (res.touches && res.touches.length === 2) {
                 touchScale(res)
                 return
             }
             // 正在缩放的情况下不触发单指操作
             if (touchZoom) return
-            let { touches, originalImageLeft, originalImageTop, cropLeft, cropTop, cropWidth, cropHeight } = touchStartInfo
+            let { touches, mouseInfo, originalImageLeft, originalImageTop, cropLeft, cropTop, cropWidth, cropHeight } = touchStartInfo
             // 移动和触摸开始的xy距离
-            let disX = res.touches[0].clientX - touches[0].clientX
-            let disY = res.touches[0].clientY - touches[0].clientY
+            let disX = 0
+            let disY = 0
+            if(res.touches){
+                disX = res.touches[0].clientX - touches[0].clientX
+                disY = res.touches[0].clientY - touches[0].clientY
+            } else {
+                disX = res.clientX - mouseInfo.clientX
+                disY = res.clientY - mouseInfo.clientY
+            }
             if (!dragTarget) {
                 // 没有拖拽目标名，就拖拽图片
                 state.originalImage.left = originalImageLeft + disX
@@ -602,8 +621,13 @@ export default {
          */
         const onTouchEnd = (e) => {
             // 手指全部离开才把缩放设为flash(避免缩放和单指操作冲突)
-            if (e.touches.length === 0) {
-                touchZoom = false
+            if(e.touches){
+                if (e.touches.length === 0) {
+                    touchZoom = false
+                }
+            } else {
+                window.removeEventListener("mousemove", onTouchMove);
+                window.removeEventListener("mouseup", onTouchEnd);
             }
         };
 
@@ -863,6 +887,9 @@ export default {
         color: #fff;
         font-size: 14px;
         padding: 0 15px;
+        >*{
+            cursor: pointer;
+        }
     }
 
     .cropper__icon-rotate {

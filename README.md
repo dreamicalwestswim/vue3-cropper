@@ -111,7 +111,7 @@ export default {
 
   参数  | 说明 | 类型 | 默认值
  ---- | ----- | ------ | ------  
- cropSize  | 裁剪框默认大小 | Number | 150 
+ cropSize  | 裁剪框默认大小 | Number | 200 
  imagePath  | 裁剪图路径(可以是本地图片、图片数据源、远程图片需配置跨域) | string |   
  fileType  | 输出文件的类型(base64、blob) | String | base64   
  imageType  | 输出图片的格式(image/jpeg、image/png、image/webp)其中 image/webp 只有 chrome 才支持 | String | image/jpeg   
@@ -127,6 +127,9 @@ export default {
  ---- | ----- | ------ | ------  
  cancel  | 点击取消触发 | Function |  
  save  | 点击裁剪,处理完毕后触发,并携带裁剪好的图片数据 | (res)=>{} |  
+ 
+   #### 2021-01-19 更新
+   新增pc鼠标事件，可兼容pc端
  
   #### 2021-01-17 重大更新
   新增图片最大尺寸限制：maxImgSize    解决移动端超大图片拖动卡顿现象。  

@@ -1,6 +1,6 @@
 {
   "name": "vue3-cropper",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "基于 Vue3.x 的图片裁剪组件",
   "private": false,
   "main":"lib/vue3-cropper.umd.min.js",
